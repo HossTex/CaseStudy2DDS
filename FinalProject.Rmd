@@ -1,0 +1,390 @@
+---
+title: "Project2"
+author: "Adam Ruthford"
+date: "12/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(class)
+library(e1071)
+library(caret)
+library(dplyr)
+
+setwd("C:/Data/DS6306/Project2")
+
+AF <- read.csv("CaseStudy2-data.csv")
+AFnoAttrit <- read.csv("CaseStudy2CompSet No Attrition.csv")
+AFnoSalary <- read.csv("CaseStudy2CompSet No Salary.csv")
+AF <- AF %>% mutate(AtrY = as.numeric(ifelse(AF$Attrition == "Yes", 1, 0)))
+
+```
+
+# Links to Project Video
+
+Link to Project Video: [Attrition Analysis for DDSAnalytics](https://youtu.be/1XWhjPP17Z8 "Attrition Analysis for DDSAnalytics")
+
+# EDA
+
+## Examine distribution of existing data variables
+
+The various data points were examined in an attempt to learn exactly how each impacted employee retention. As an example employee stock option levels were analyzed with respect to attrition
+```{r ExampleVarAnalysis}
+AFSOL <- AF %>% group_by(StockOptionLevel) %>% summarise(PecentAttrit = sum(AtrY)/n(), totalPeople = n())
+ggplot(data = AFSOL, mapping = aes(x= StockOptionLevel, y=PecentAttrit, size=totalPeople)) + ggtitle("Employee Attrition versus Stock Option Level") +
+  geom_point(stat = "identity")
+
+```
+
+The chart above indicates that employees in the lowest stock option level group and the highest stock option group have the highest turnover. Similar charts were prepared for each categorical variable. 
+
+## Derived Variables
+
+Looking at all the variables suggested that derived variables could be created and used to a positive benefit in the model. StockOptionLevel was one such variable, a derived variable that contains a simple yes/no value with yes being for StockOptionLevel 0 or 3. The final list of derived variables is shown below
+
+```{r List of derived variable}
+AF$SO30 <- ifelse(AF$StockOptionLevel == 3 | AF$StockOptionLevel == 0,1,0)
+AF$MIbyE <- AF$MonthlyIncome/AF$Education
+AF$isSingle <- ifelse(AF$MaritalStatus == "Single",1,0)
+AF$YCR02 <- ifelse(AF$YearsInCurrentRole <= 2,1,0)
+AF$SO3 <- ifelse(AF$StockOptionLevel == 3,1,0)
+AF$SO0 <- ifelse(AF$StockOptionLevel == 0,1,0)
+AF$isJS1 <- ifelse(AF$JobSatisfaction == 1,1,0)
+AF$isJS4 <- ifelse(AF$JobSatisfaction == 4,1,0)
+
+```
+
+# Model Selection
+
+Two different types of models were considered for this analysis, kNN and Na&iuml;ve Bayes. 
+
+## Selection Criteria
+
+Whatever model selected was required to have both a sensitivity and specificity of 60%. Sensitivity was not a problem, even the most rudimentary model typically met this criteria. The required specificity was not so easily obtained. Since we are dealing with an attrition rate of one in six roughly we can see that it would be difficult to randomly get the correct result. Conversely we could just predict there was no attrition and we would have a better than 80% accuracy.
+
+## kNN
+
+The kNN model was ultimately rejected. I was unable to get a specificity reading higher than the mid 30's. 
+
+### kNN Optimization Process
+
+A series of derived variables was created for this model as well, many of these variables being scaled inputs. Each variables was then run against all other variables in a two variable kNN model. The most likely candidates were then run against each other again in a three variable kNN model.\
+ScaleOverTime - Scaled OverTime\
+isJL1 - JobLevel = 1\
+isSingle - MaritialStatus is Single\
+ScaleMonthlyIncome - MonthlyIncolme scaled\
+SO30 - StockOptionsLevel either 0 or 3\
+isTWY03 - TotalWorkingYears less than or equal to 3\
+ScaleYearsWithCurrManager - YearsWithCurrManager with current manager scaled\
+
+Once that was done the remaing likely candidates were run against each other by hand. Also, a loop was created to optimize the "k" parameter. The final kNN model is shown below with results. 
+
+```{r FinalkNN}
+# variables only used in kNN final model
+AF$ScaleOverTime = scale(as.numeric(AF$OverTime))
+AF$ScaleMonthlyIncome = scale(AF$MonthlyIncome)
+AF$isJL1 <- ifelse(AF$JobLevel == 1,1,0)
+
+testParam <- c("ScaleOverTime","isSingle","ScaleMonthlyIncome","isJL1")
+
+AFAttrit <- knn.cv(AF[,testParam], AF$Attrition, k = 11)
+CM <- confusionMatrix(table(AFAttrit, AF$Attrition))
+
+```
+For the final kNN model:\
+Accuracy = `r 100*unname(CM[[3]][c('Accuracy')])`%\
+Sensitivity = `r 100*unname(CM[[4]][c('Sensitivity')])`%\
+Specificity = `r 100*unname(CM[[4]][c('Specificity')])`%\
+
+## Na&iuml;ve Bayes
+
+After many iterations a successful version of a Na&iuml;ve Bayes model was created
+
+### Na&iuml;ve Bayes Optimization Process
+
+#### Derived Variables
+
+First some derived variables were created similiar to those created for the kNN model
+
+```{r DerivedVarNB}
+AF$MIbyE <- AF$MonthlyIncome/AF$Education
+AF$isSingle <- ifelse(AF$MaritalStatus == "Single",1,0)
+AF$SO30 <- ifelse(AF$StockOptionLevel == 3 | AF$StockOptionLevel == 0,1,0)
+AF$isAgeLE22 <- ifelse(AF$Age <= 22,1,0)
+AF$isJL1 <- ifelse(AF$JobLevel == 1,1,0)
+AF$isJI1 <- ifelse(AF$JobInvolvement == 1,1,0)
+```
+
+#### List of Column names
+
+A varaible containing a list of column names was prepared. Considering the information learned in the EDA process some Columns  were judged of no impact to the final model and were removed.
+
+```{r AFColNamesNB}
+AFColNam <- colnames(AF)
+
+#Remove columns we dont need to train on
+SkipName <- c("ID","Attrition","EmployeeCount","EmployeeNumber","Over18","StandardHours")
+
+AFColNam <- AFColNam[!AFColNam %in% SkipName]
+```
+
+#### Testing loop
+
+A loop was then prepared to test each combination of two columns. This took several hours to run and the results were written to a file. This part is not run as part of this document since it would take the page several hours to complete
+
+```{r RunLoop, eval=FALSE}
+# Setup things used by model repeatedly
+
+trainControl <- trainControl(method = "cv", number = 10)
+
+# set up tuning grid
+search_grid <- expand.grid(
+  usekernel = c(TRUE, FALSE),
+  fL = 0:5,
+  adjust = seq(0, 5, by = 1)
+)
+
+y = trainAF$Attrition
+
+#Setup begin end list for 
+testOffset = 0
+
+EndA1 <- length(AFColNam) - 1 - testOffset
+EndA2 <- length(AFColNam) - testOffset
+
+# Results dataframe
+
+dfRes <- data.frame(Attribute1 = character(), Attribute2 = character(), 
+                    Acc = numeric(), Sens = numeric(), Spec = numeric(),
+                    stringsAsFactors = FALSE)
+
+for (A1 in seq(1,EndA1)){
+  BeginA2 = A1 + 1
+  for (A2 in seq(BeginA2,EndA2)){
+
+    testParam <- c(AFColNam[A1],AFColNam[A2])
+    x = trainAF[,testParam]
+
+    nb.m2 <- train(
+      x = x,
+      y = y,
+      method = "nb",
+      trControl = trainControl,
+      tuneGrid = search_grid,
+      preProc = c("BoxCox", "center", "scale") #, "pca"
+    )
+
+    CM = confusionMatrix(table(predict(nb.m2,testAF[,testParam]),testAF$Attrition))
+
+    Acc <- unname(CM[[3]][c('Accuracy')])
+    Sens <- unname(CM[[4]][c('Sensitivity')])
+    Spec <- unname(CM[[4]][c('Specificity')])
+
+    dfRes[nrow(dfRes) + 1,] <- c(AFColNam[A1],AFColNam[A2], Acc, Sens, Spec)
+    
+    prnStr <- paste(AFColNam[A1],AFColNam[A2])
+    print(prnStr)
+  }
+}
+
+write.csv(dfRes, file = "NBOptimize.csv", row.names = FALSE, na="")
+
+```
+
+#### Conclusion form testing loop
+
+After the file was examined a winowing of columns was performed with only the best used to further build the model. However, this failed to create a model with anywhere near the desired sensitivity and specificity. 
+
+#### All Columns model
+
+Instead a different approach was tried. All columns, including derived columns, were included in a model. The model was then run with one column at a time being removed. If there was no change in the model or the model performed better the column was kept out. The code below shows the various columns commented out.
+
+```{r AllColumnModel}
+trainIndices = sample(seq(1:length(AF$Age)),round(.8*length(AF$Age)))
+trainAF = AF[trainIndices,]
+testAF = AF[-trainIndices,]
+
+m <- naiveBayes(Attrition ~ 
+                  #Age + 
+                  #BusinessTravel + 
+                  #DailyRate + 
+                  #Department + 
+                  DistanceFromHome + 
+                  #Education + 
+                  EducationField + 
+                  #EmployeeCount + 
+                  #EnvironmentSatisfaction + 
+                  #Gender +
+                  #HourlyRate + 
+                  #JobInvolvement + 
+                  #JobLevel + 
+                  JobRole + 
+                  JobSatisfaction + 
+                  #MaritalStatus + 
+                  MonthlyIncome + 
+                  #MonthlyRate + 
+                  #NumCompaniesWorked + 
+                  OverTime + 
+                  #PercentSalaryHike + 
+                  PerformanceRating + 
+                  #RelationshipSatisfaction + 
+                  StockOptionLevel + 
+                  TotalWorkingYears + 
+                  TrainingTimesLastYear + 
+                  #WorkLifeBalance + 
+                  #YearsAtCompany + 
+                  YearsInCurrentRole + 
+                  #YearsSinceLastPromotion + 
+                  #YearsWithCurrManager + 
+                  MIbyE + 
+                  isSingle + 
+                  SO30
+                  #isAgeLE22 + 
+                  #isJL1 + 
+                  #isJI1
+                  ,
+                  data = trainAF, laplace = 1)
+pred <- predict(m, testAF)
+confusionMatrix(table(pred, testAF$Attrition))
+```
+
+#### Conclusioin from All Columns model
+
+This model was in the ball park with the average specificity approaching the 60% mark, individual runs maybe well short of that mark. Sensitivity and accuracy are both fine. 
+
+### Final model and proof of it meeting desired performance.
+
+A final model was prepared for the project. Additional variables were created or used based upon the previous all columns model. The performance of the model was verified by processing a loop with the average run verified at being greater than 60%. Also the optimum laplace transform number was tested in a loop and determined to be 3. Some final fine tuning of the model was performed. This involved making new derived variables from some other variables, and also including the "parent" variables of some derived variables, this optimized performance. During testing a "set.seed" statement was used to insure that the same data was tested and compared, it has been commented out at this time. It deos take about half a minute for this final model to run because it is executing the loop.
+
+```{r FinalNB}
+# Evaluate in a loop Execute 100 times each for laplace 0 to 5
+
+dfRes <- data.frame(laplace=numeric(),Accuracy=numeric(),Sensitivity=numeric(),
+                    Specificity=numeric(),stringsAsFactors = FALSE)
+
+for (lp in seq(0,5)){
+  
+  Acc = 0
+  Sens = 0
+  Spec = 0
+  
+  for (i in seq(1,100)){
+#    set.seed(i+300)
+    trainIndices = sample(seq(1:length(AF$Age)),round(.80*length(AF$Age)))
+    trainAF = AF[trainIndices,]
+    testAF = AF[-trainIndices,]
+    
+    m <- naiveBayes(Attrition ~ DistanceFromHome + EducationField + MonthlyIncome + JobRole + isJS4 + isJS1 + YCR02 +
+                      OverTime + PerformanceRating + TotalWorkingYears + TrainingTimesLastYear + StockOptionLevel +
+                      YearsInCurrentRole + MIbyE + isSingle + SO30 + SO3 + SO0 + MaritalStatus
+                    ,data = trainAF, laplace = lp)
+    pred <- predict(m, testAF)
+    CM <- confusionMatrix(table(pred, testAF$Attrition))
+
+    Acc <- Acc + unname(CM[[3]][c('Accuracy')])
+    Sens <- Sens + unname(CM[[4]][c('Sensitivity')])
+    Spec <- Spec + unname(CM[[4]][c('Specificity')])
+    
+  }
+
+  dfRes <- dfRes %>% add_row(laplace=lp,Accuracy=Acc, Sensitivity=Sens, Specificity=Spec)
+
+}
+
+dfRes
+```
+
+#### Analysis of dfRes
+
+The final looped run of the model is dispalyed above. Even with 100 iterations there is some variance in the model performance. This is due to the different samples prepared for the trainAF and testAF datasets. Generally speaking all sensitivity and accuracy are well above the desired 60% target. The specificity hover around 60-63%. Most data runs have a laplace value of 3 being the best performing model as measured by specificity. The following single data run shows the model performance with a laplace of 3. Note that single runs sometimes return less than the desired 60% for specificity.
+
+```{r IndividualModelRun}
+# Laplace seems to peak at at 3
+m <- naiveBayes(Attrition ~ DistanceFromHome + EducationField + MonthlyIncome + JobRole + isJS4 + isJS1 + YCR02 +
+                  OverTime + PerformanceRating + TotalWorkingYears + TrainingTimesLastYear + StockOptionLevel +
+                  YearsInCurrentRole + MIbyE + isSingle + SO30 + SO3 + SO0 + MaritalStatus
+                ,data = trainAF, laplace = 3)
+pred <- predict(m, testAF)
+CM <- confusionMatrix(table(pred, testAF$Attrition))
+
+unname(CM[[3]][c('Accuracy')])
+unname(CM[[4]][c('Sensitivity')])
+unname(CM[[4]][c('Specificity')])
+
+```
+
+### Prepare and write out the predicted attrition
+
+The following code will write out the attrition information in the desired format. Note the last write statement maybe commented out.
+
+```{r FinalWrite}
+# prepare the Non Attrition test data
+AFnoAttrit$MIbyE <- AFnoAttrit$MonthlyIncome/AFnoAttrit$Education
+AFnoAttrit$isSingle <- ifelse(AFnoAttrit$MaritalStatus == "Single",1,0)
+AFnoAttrit$SO30 <- ifelse(AFnoAttrit$StockOptionLevel == 3 | AFnoAttrit$StockOptionLevel == 0,1,0)
+AFnoAttrit$isAgeLE22 <- ifelse(AFnoAttrit$Age <= 22,1,0)
+AFnoAttrit$isJL1 <- ifelse(AFnoAttrit$JobLevel == 1,1,0)
+AFnoAttrit$isJI1 <- ifelse(AFnoAttrit$JobInvolvement == 1,1,0)
+AFnoAttrit$ScaleMonthlyIncome = scale(AFnoAttrit$MonthlyIncome)
+AFnoAttrit$ScaleMonthlyIncomeLog = scale(log(AFnoAttrit$MonthlyIncome))
+AFnoAttrit$YCR02 <- ifelse(AFnoAttrit$YearsInCurrentRole <= 2,1,0)
+
+
+AFnoAttrit$SO3 <- ifelse(AFnoAttrit$StockOptionLevel == 3,1,0)
+AFnoAttrit$SO0 <- ifelse(AFnoAttrit$StockOptionLevel == 0,1,0)
+
+AFnoAttrit$isJR123 <- ifelse(AFnoAttrit$JobRole == "Technician Manager"| AFnoAttrit$JobRole == "Manufacturing Director"| AFnoAttrit$JobRole == "Research Director",1,2)
+AFnoAttrit$isJR123 <- ifelse(AFnoAttrit$JobRole == "Sales Representative",3,AFnoAttrit$isJR123)
+
+AFnoAttrit$isJS1 <- ifelse(AFnoAttrit$JobSatisfaction == 1,1,0)
+AFnoAttrit$isJS4 <- ifelse(AFnoAttrit$JobSatisfaction == 4,1,0)
+
+#Predict the results
+prednoAttrit <- predict(m, AFnoAttrit)
+
+#write.csv(prednoAttrit, file = "Case2PredictionsRuthford Attrition.csv", row.names = FALSE, na="")
+
+```
+
+# Linear Regression
+
+## Model Creation
+
+A linear regression model was prepared and with minimal adjustment was able to meet the requirement of $RMSE < \$3000$ 
+
+```{r LinearRegression}
+fit <-  train(MonthlyIncome~YearsAtCompany + TotalWorkingYears + JobLevel, method = "lm", data = AF, trControl = trainControl(method = "LOOCV"))
+fit$results[2]
+
+```
+
+## Statistical validation of Linear model
+
+The linear model was further analyzed for statistical significance
+
+```{r lmStat}
+summary(fit)
+
+```
+
+### Results discussion
+
+The RMSE of the chosen model was \$1387.13. The final model equation takes the form of:
+$MonthlyIncome = -1764.37 -32.04(YearsAtCompany) + 70.76(TotalWorkingYears) + 3724.98(JobLevel)$\
+All parameters are statistically significant with $\alpha \leq 0.01$ for every parameter and the intercept\
+p-value for Intercept or $\beta_0 < 2 *  10^{-16}$\
+p-value for YearsAtCompany or $\beta_1 = 0.00158$\
+p-value for TotalWorkingYears or $\beta_2 = 2.64 * 10^{-10}$\
+p-value for JobLevel or $\beta_3 < 2 *  10^{-16}$\
+
+The linear model equation specifies the following relationships. A negative intercept value is provided for a hypothetical person with no working experience and a zero for job level, which can not happen as the minimum job level is 1. As a practical matter the minimum monthly salary would be (1960.61 = -1764.37 + (3724.98*1)).
+
+```{r PredictFinalLM}
+
+prednoSalary <- predict(fit, AFnoSalary)
+write.csv(prednoSalary, file = "Case2PredictionsRuthford Salary.csv", row.names = FALSE, na="")
+
+```
