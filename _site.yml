@@ -1,0 +1,10 @@
+name: "Adams website"
+navbar:
+  title: "Adam Ruthford's Website"
+  left:
+    - text: "About Myself"
+      href: index.html
+    - text: "Beer Study"
+      href: Micro-Brewery-Analysis.html
+    - text: "Beer Study Interactive"
+      href:  https://hosstex.shinyapps.io/beer_ibu_abv1/
