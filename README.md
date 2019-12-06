@@ -6,3 +6,5 @@ The "Rmd" file FinalProject.Rmd is the one that needs to be examined for my grad
 My website for this class can be accessed at [My Website](https://hosstex.github.io/)
 
 The link to the [Attrition Analysis video](https://youtu.be/1XWhjPP17Z8)
+
+This link is for the [Final Project Rmd File](https://hosstex.github.io/FinalProject.html)
